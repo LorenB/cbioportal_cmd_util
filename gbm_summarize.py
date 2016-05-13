@@ -59,6 +59,15 @@ def get_profile_data(genetic_profile_id, gene_list, summary_function, useLocalFi
 	file_obj.close()
 	return results
 
+def get_request_payload(genetic_profile_id, gene_list):
+	payload = {}
+	payload['cmd'] = 'getProfileData'
+	payload['id_type'] = 'gene_symbol'
+	payload['case_set_id'] = 'gbm_tcga_cnaseq'
+	payload['genetic_profile_id'] = genetic_profile_id
+	payload['gene_list'] = gene_list
+	return payload
+
 def get_percent_of_cases_copy_number_altered_data(profile):
 	data = {}	
 	altered_count = 0
@@ -79,7 +88,7 @@ def get_percent_of_cases_copy_number_altered_data(profile):
 		else:
 			val = int(profile[key])
 			# increment the altered count by one for any valid non-zero result
-			if val != 0:
+			if int(val) not in [0, 1, -1]:
 				altered_count += 1
 			total_valid += 1
 	data['value'] = float(altered_count)/float(total_valid)
@@ -111,14 +120,7 @@ def get_profile_data_API_response(url):
 	file_obj = StringIO.StringIO(response.text)
 	return file_obj
 
-def get_request_payload(genetic_profile_id, gene_list):
-	payload = {}
-	payload['cmd'] = 'getProfileData'
-	payload['id_type'] = 'gene_symbol'
-	payload['case_set_id'] = 'gbm_tcga_cnaseq'
-	payload['genetic_profile_id'] = genetic_profile_id
-	payload['gene_list'] = gene_list
-	return payload
+
 
 def get_profile_data_file_name(genetic_profile_id, gene_list):
 	'''This function returns the file_path to be used to locate a local version of the data returned by the API.
