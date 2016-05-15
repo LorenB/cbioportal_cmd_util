@@ -6,59 +6,95 @@ import os
 import sys
 import pprint
 
-genetic_profile_lookup = {
-	'mutations': {'genetic_profile_id': 'gbm_tcga_mutations', 'display_text': '{COMMON} is mutated in {percent_display} of all cases.'},
-	'copy_number_alterations': {'genetic_profile_id': 'gbm_tcga_gistic',  'display_text': '{COMMON} is copy number altered in {percent_display} of all cases.'},
-	'aggregate': {'display_text': 'Total % of cases where {COMMON} is altered by either mutation or copy number alteration: {percent_display} of all cases.'}
-}
 
-def display_gene_alterations_summary_descriptions(gene_list):
-	metrics = ['mutations', 'copy_number_alterations', 'aggregate']
-	for gene in gene_list:
-		gene_alterations_summary_descriptions = get_gene_alterations_summary_descriptions(gene)
-		for metric in metrics:
-			print gene_alterations_summary_descriptions[metric]		
 
-def get_gene_alterations_summary_descriptions(gene):
-	gene_alterations_data = get_all_gene_alterations_data(gene)
-	gene_alterations_summary = get_all_gene_alterations_summary(gene_alterations_data)
-	gene_alterations_summary_descriptions = {}
-	display_data = {}
-	for alteration_type in gene_alterations_summary['data']:
-		display_data = gene_alterations_summary['gene_meta_data'].copy() 
-		display_data['percent_display'] = gene_alterations_summary['data'][alteration_type]['percent_display']
-		gene_alterations_summary_descriptions[alteration_type] = genetic_profile_lookup[alteration_type]['display_text'].format(**display_data) 
-	return gene_alterations_summary_descriptions
+def get_case_set_data(gene_list):
+	case_set_data = {'cases': {}, 'gene_meta_data':{}}
+	genetic_profile_ids = ['gbm_tcga_gistic', 'gbm_tcga_mutations']
+	for genetic_profile_id in genetic_profile_ids:
+		add_genetic_profile(case_set_data, genetic_profile_id, gene_list)
+		add_genetic_profile(case_set_data, genetic_profile_id, gene_list)	
+	return case_set_data
 
-def get_all_gene_alterations_data(gene):
-	gene_alterations_data = {} 
-	gene_alterations_data['mutations'] = get_gene_alterations(genetic_profile_lookup['mutations']['genetic_profile_id'], gene)
-	gene_alterations_data['copy_number_alterations'] = get_gene_alterations(genetic_profile_lookup['copy_number_alterations']['genetic_profile_id'], gene)
-	return gene_alterations_data
-
-def get_all_gene_alterations_summary(gene_alterations_data):
-	gene_alterations_summary = {'data': {}, 'gene_meta_data': {} }
-	gene_alterations_summary['gene_meta_data'] = gene_alterations_data['mutations']['gene_meta_data']
-	gene_alterations_summary['data']['mutations'] = get_gene_mutation_data_summary(gene_alterations_data['mutations']['cases'])
-	gene_alterations_summary['data']['copy_number_alterations'] = get_gene_copy_number_alteration_data_summary(gene_alterations_data['copy_number_alterations']['cases'])	
-	gene_alterations_summary['data']['aggregate'] = {}
-	all_altered_cases = set(gene_alterations_summary['data']['mutations']['altered_case_ids']) | set(gene_alterations_summary['data']['copy_number_alterations']['altered_case_ids'])
-	all_altered_cases_count = len(all_altered_cases)
-	total_cases = len(gene_alterations_data['mutations']['cases'])
-	gene_alterations_summary['data']['aggregate']['percent_decimal'] = float(all_altered_cases_count)/float(total_cases)
-	gene_alterations_summary['data']['aggregate']['percent_display'] = str( int( round(gene_alterations_summary['data']['aggregate']['percent_decimal']*100, 0) ) ) + r'%'
+def display_case_set_summary(case_set):
+	display = [{'analysis': 'profile_gbm_tcga_mutations_summary', 'text': '{gene} is mutated in {result_text}% of all cases.', 'summary_function': get_mutation_percent},
+				{'analysis': 'profile_gbm_tcga_gistic_summary',  'text': '{gene} is copy number altered in {result_text}% of all cases.', 'summary_function': get_copy_number_altered_percent},
+				{'analysis': 'aggregate', 'text': 'Total % of cases where {gene} is altered by either mutation or copy number alteration: {result_text}% of all cases.', 'summary_function': get_all_alterated_percent}]
 	
-	return gene_alterations_summary
+	case_set_summary = get_case_set_summary(case_set)
+	tokens = {}
+	for gene in case_set_summary:
+		tokens = {'gene': gene}
+		for metric in display:
+			result_percent= metric['summary_function'](case_set_summary, gene)
+			tokens['result_text'] = '{0:.{1}f}'.format(result_percent*100, 0)
+			print metric['text'].format(**tokens)
 
-def get_gene_alterations(genetic_profile_id, gene, useLocalFile=True):
+def get_mutation_percent(case_set_summary, gene):
+	return float(case_set_summary[gene]['mutated_case_count']) / float(case_set_summary[gene]['total_case_count'])
+
+def get_copy_number_altered_percent(case_set_summary, gene):
+	return float(case_set_summary[gene]['copy_number_alterated_case_count']) / float(case_set_summary[gene]['total_case_count'])
+
+def get_all_alterated_percent(case_set_summary, gene):
+	return float(case_set_summary[gene]['copy_number_alterated_case_count'] + case_set_summary[gene]['mutated_case_count'] - case_set_summary[gene]['multiple_alterations_case_count']) / float(case_set_summary[gene]['total_case_count'])
+
+def is_mutated(case, gene):
+	genetic_profile_id = 'gbm_tcga_mutations'
+	profile_result = case[gene][genetic_profile_id] 
+	if profile_result == 'NaN' or str(profile_result) == '0':
+		return False
+	else:
+		return True
+
+def is_copy_number_alterated(case, gene):
+	genetic_profile_id = 'gbm_tcga_gistic'
+	profile_result = case[gene][genetic_profile_id]
+	# @TODO: determine best way to handle 'NA' values
+	if int(profile_result) not in [0, 1, -1]:
+		return True
+	else:
+		return False
+
+def get_case_set_summary(case_set):
+	case_set_summary = { }
+	total_case_count = len(case_set['cases'])
+	for gene in case_set['gene_meta_data']:
+		mutated_case_count = 0
+		copy_number_alterated_case_count = 0
+		multiple_alterations_case_count = 0
+
+		for case in case_set['cases']:
+			if is_copy_number_alterated(case_set['cases'][case], gene):
+				copy_number_alterated_case_count += 1
+			if is_mutated(case_set['cases'][case], gene):
+				mutated_case_count += 1
+			if is_copy_number_alterated(case_set['cases'][case], gene) and is_mutated(case_set['cases'][case], gene):
+				multiple_alterations_case_count += 1
+		
+		mutated_case_percent = float(mutated_case_count) / float(total_case_count)
+		copy_number_alterated_percent = float(copy_number_alterated_case_count) / float(total_case_count)
+		all_alterated_percent = float(copy_number_alterated_case_count + mutated_case_count - multiple_alterations_case_count) / float(total_case_count)
+		case_set_summary[gene] = {'total_case_count': total_case_count,
+									'mutated_case_count': mutated_case_count,
+									'copy_number_alterated_case_count': copy_number_alterated_case_count,
+									'multiple_alterations_case_count': multiple_alterations_case_count,
+									'all_alterated_percent': all_alterated_percent}
+
+	return case_set_summary
+
+def add_genetic_profile(case_set_data, genetic_profile_id, gene_list, useLocalFile=False):
 	'''Returns one genetic profile for ever gene provided.'''
 	gene_alterations = {'meta_data': [], 'gene_meta_data': {}, 'cases': {} }
 	gene_meta_data_fields = ['COMMON', 'GENE_ID']
-	url = get_profile_data_URL(genetic_profile_id, gene)
+	
+	if type(gene_list) == list():
+		gene_list = ','.join(gene_list)
 	
 	if useLocalFile:
-		file_obj = get_profile_data_from_file(get_profile_data_file_name(genetic_profile_id, gene))
+		file_obj = get_profile_data_from_file(get_profile_data_file_name(genetic_profile_id, gene_list))
 	else:
+		url = get_profile_data_URL(genetic_profile_id, gene_list)
 		# create a object with same interface as open file to allow for the use of file-based parsing methods
 		file_obj = get_profile_data_API_response(url)
 
@@ -67,22 +103,29 @@ def get_gene_alterations(genetic_profile_id, gene, useLocalFile=True):
 	for line in iter(file_obj.readline, ''):
 		# check if the line begins with "#" as this is the convention for providing meta-data in the text returned by the API
 		if line[0] == '#':
-			gene_alterations['meta_data'].append(line)
 			header_row_begin_position = file_obj.tell()
 		else:
 			break
 	# get the position before the header row (the file curesor will be at the end of the end of the header row when the loop exits)
 	file_obj.seek(header_row_begin_position)
 	reader = csv.DictReader(file_obj, delimiter='\t')
-	row = reader.next()
-
-	for field in row:
-		if field in gene_meta_data_fields:
-			gene_alterations['gene_meta_data'][field] = row[field]
-		else:
-			gene_alterations['cases'][field] = row[field]
+	for row in reader:
+		# get the common abbreviation for the gene represented in the row of data
+		gene = row['COMMON']
+		for field in row:
+			# populate the meta data for gene represented in this row
+			if field in gene_meta_data_fields:
+				if not (gene in case_set_data['gene_meta_data']):
+					case_set_data['gene_meta_data'][gene] = {}
+				case_set_data['gene_meta_data'][gene][field] = row[field]
+			else:
+				if not (field in case_set_data['cases']):
+					case_set_data['cases'][field] = {}
+				if not (gene in case_set_data['cases'][field]):
+					case_set_data['cases'][field][gene] = {}
+				case_set_data['cases'][field][gene][genetic_profile_id] = row[field]
 	file_obj.close()
-	return gene_alterations
+
 
 def get_request_payload(genetic_profile_id, gene_list):
 	payload = {}
@@ -92,54 +135,6 @@ def get_request_payload(genetic_profile_id, gene_list):
 	payload['genetic_profile_id'] = genetic_profile_id
 	payload['gene_list'] = gene_list
 	return payload
-
-def get_gene_copy_number_alteration_data_summary(cases):
-	data = {}
-	altered_cases = 0
-	total_cases = 0
-	total_valid_cases = 0
-	data['altered_case_ids'] = []
-
-	for case in cases:
-		total_cases += 1
-		# if data was not available, move to the next data point 
-		#   without incrementing the count of valid data points
-		if cases[case] == 'NA':
-			continue
-		else:
-			val = int(cases[case])
-			# increment the altered count by one for any valid non-zero result
-			if int(val) not in [0, 1, -1]:
-				altered_cases += 1
-				data['altered_case_ids'].append(case)
-			total_valid_cases += 1
-	data['total_cases'] = total_cases
-	data['total_valid_cases'] = total_valid_cases
-	data['percent_decimal'] = float(altered_cases)/float(total_valid_cases)
-	data['percent_display'] =  str( int( round(data['percent_decimal']*100, 0) ) ) + r'%'
-	return data
-
-def get_gene_mutation_data_summary(cases):
-	'''Returns summary data gene mutation '''
-	data = {}
-	altered_cases = 0
-	total_cases = 0
-	total_valid_cases = 0
-	data['altered_case_ids'] = []
-
-	for case in cases:
-		total_cases += 1
-		total_valid_cases += 1
-		if cases[case] == 'NaN' or str(cases[case]) == '0':
-			continue
-		else:
-			data['altered_case_ids'].append(case)
-			altered_cases += 1
-	data['total_cases'] = total_cases
-	data['total_valid_cases'] = total_valid_cases
-	data['percent_decimal'] = float(altered_cases)/float(total_valid_cases)
-	data['percent_display'] =  str( int( round(data['percent_decimal']*100, 0) ) ) + r'%'
-	return data
 
 def get_profile_data_API_response(url):
 	'''This function returns an object that with same interface as an open file.'''
@@ -169,8 +164,9 @@ def main():
 		print('usage: gbm_summarize.py gene1 [gene2, gene3]')
 	else:
 		# get all arguments except the argv[0] (the script file), add them to a comma-delimited string
-		gene_list = sys.argv[1:]
-		display_gene_alterations_summary_descriptions(gene_list)
+		gene_list = ','.join(sys.argv[1:])
+		case_set_data = get_case_set_data(gene_list)
+		display_case_set_summary(case_set_data)
 
 if __name__ == '__main__':
 	main()
