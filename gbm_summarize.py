@@ -19,8 +19,7 @@ class CaseSet(object):
 			self.add_genetic_profile(genetic_profile_id, gene_list, useLocalFile=False)
 
 	def add_genetic_profile(self, genetic_profile_id, gene_list, useLocalFile=False):
-		"""Adds a genetic profile for every gene provided."""
-		gene_alterations = {'meta_data': [], 'gene_meta_data': {}, 'cases': {} }
+		"""Adds the genetic profile data to for every gene provided."""
 		gene_meta_data_fields = ['COMMON', 'GENE_ID']
 		
 		if type(gene_list) == list():
@@ -61,20 +60,21 @@ class CaseSet(object):
 					self.cases[field][gene][genetic_profile_id] = row[field]
 		file_obj.close()
 
-	def display_case_set_summary(self):
+	def display_case_set_summary(self, display_mode='verbose'):
 		""""Displays a summary of all the analysis done on the GBM genetic profile data available for all specfied genes."""
-		display = [{'analysis': 'profile_gbm_tcga_mutations_summary', 'text': '{gene} is mutated in {result_text}% of all cases.', 'summary_function': self.get_mutation_percent},
-					{'analysis': 'profile_gbm_tcga_gistic_summary',  'text': '{gene} is copy number altered in {result_text}% of all cases.', 'summary_function': self.get_copy_number_altered_percent},
-					{'analysis': 'aggregate', 'text': 'Total % of cases where {gene} is altered by either mutation or copy number alteration: {result_text}% of all cases.', 'summary_function': self.get_all_alterated_percent}]
+		display = [{'analysis': 'profile_gbm_tcga_mutations_summary', 'text': '{gene} is mutated in {result_text}% of all cases.', 'summary_function': self.get_mutation_percent, 'display_modes': ['verbose']},
+					{'analysis': 'profile_gbm_tcga_gistic_summary',  'text': '{gene} is copy number altered in {result_text}% of all cases.', 'summary_function': self.get_copy_number_altered_percent, 'display_modes': ['verbose']},
+					{'analysis': 'aggregate', 'text': 'Total % of cases where {gene} is altered by either mutation or copy number alteration: {result_text}% of all cases.', 'summary_function': self.get_all_alterated_percent, 'display_modes': ['verbose', 'concise']}]
 		
 		self.set_summary()
 		tokens = {}
 		for gene in self.summary:
 			tokens = {'gene': gene}
 			for metric in display:
-				result_percent= metric['summary_function'](gene)
-				tokens['result_text'] = '{0:.{1}f}'.format(result_percent*100, 0)
-				print metric['text'].format(**tokens)
+				if display_mode in metric['display_modes']:
+					result_percent = metric['summary_function'](gene)
+					tokens['result_text'] = '{0:.{1}f}'.format(result_percent*100, 0)
+					print metric['text'].format(**tokens)
 
 	def get_mutation_percent(self, gene):
 		"""Returns the perceantage (as  decimal) of all cases where mutations were detected for a specific gene (includes cases with multiple alterations)."""
@@ -114,6 +114,7 @@ class CaseSet(object):
 		copy_number_alterated_case_count = 0
 		multiple_alterations_case_count = 0		
 		self.total_case_count = len(self.cases)
+		# for all genes for which data has been retrieved
 		for gene in self.gene_meta_data:
 			for case in self.cases:
 				if self.is_copy_number_alterated(self.cases[case], gene):
@@ -167,10 +168,15 @@ def main():
 	if ( len(sys.argv) == 1 ) or ( len(sys.argv) > 4 ):
 		print('usage: gbm_summarize.py gene1 [gene2, gene3]')
 	else:
+		if len(sys.argv) > 2:
+			display_mode='concise'
+		else:
+			display_mode='verbose'
 		# get all arguments except the argv[0] (the script file), add them to a comma-delimited string
 		gene_list = ','.join(sys.argv[1:])
+
 		case_set = CaseSet(gene_list)
-		case_set.display_case_set_summary()
+		case_set.display_case_set_summary(display_mode)
 
 if __name__ == '__main__':
 	main()
